@@ -18,6 +18,7 @@ var (
 	ErrMissingShardingKey = errors.New("sharding key or id required, and use operator =")
 	ErrInvalidID          = errors.New("invalid id format")
 	ErrInsertDiffSuffix   = errors.New("can not insert different suffix table in one query ")
+	ErrInClauseCrossShard = errors.New("IN clause contains values from different shards")
 )
 
 // ResolveResult stores the parsing result
@@ -121,9 +122,9 @@ func (s *WarpItem) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 		stQuery = insertStmt.String()
 
 	} else {
-		var value any
+		var values []any
 		var keyFind bool
-		value, _, keyFind, err = s.nonInsertValue(s.rule.ShardingKey, condition, args...)
+		values, _, keyFind, err = s.nonInsertValue(s.rule.ShardingKey, condition, args...)
 		if err != nil {
 			return
 		}
@@ -133,11 +134,26 @@ func (s *WarpItem) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 			return
 		}
 
-		shardValue = value
+		// Validate all values belong to the same shard
+		if len(values) > 0 {
+			shardValue = values[0]
+			suffix, err = getSuffix(values[0], s.rule)
+			if err != nil {
+				return
+			}
 
-		suffix, err = getSuffix(value, s.rule)
-		if err != nil {
-			return
+			// Check if all values belong to the same shard
+			for _, v := range values[1:] {
+				subSuffix, suffixErr := getSuffix(v, s.rule)
+				if suffixErr != nil {
+					err = suffixErr
+					return
+				}
+				if subSuffix != suffix {
+					err = ErrInClauseCrossShard
+					return
+				}
+			}
 		}
 
 		newTable := &sqlparser.TableName{Name: &sqlparser.Ident{Name: tableName + suffix}}
@@ -238,7 +254,7 @@ func (s *WarpItem) insertValue(key string, names []*sqlparser.Ident, exprs []sql
 	return
 }
 
-func (s *WarpItem) nonInsertValue(key string, condition sqlparser.Expr, args ...any) (value any, id int64, keyFind bool, err error) {
+func (s *WarpItem) nonInsertValue(key string, condition sqlparser.Expr, args ...any) (values []any, id int64, keyFind bool, err error) {
 	err = sqlparser.Walk(sqlparser.VisitFunc(func(node sqlparser.Node) error {
 		if n, ok := node.(*sqlparser.BinaryExpr); ok {
 			x, ok := n.X.(*sqlparser.Ident)
@@ -249,20 +265,24 @@ func (s *WarpItem) nonInsertValue(key string, condition sqlparser.Expr, args ...
 				}
 			}
 			if ok {
+				// Handle = operator
 				if x.Name == key && n.Op == sqlparser.EQ {
 					keyFind = true
+					var val any
 					switch expr := n.Y.(type) {
 					case *sqlparser.BindExpr:
-						value = args[expr.Pos]
+						val = args[expr.Pos]
 					case *sqlparser.StringLit:
-						value = expr.Value
+						val = expr.Value
 					case *sqlparser.NumberLit:
-						value = expr.Value
+						val = expr.Value
 					default:
 						return sqlparser.ErrNotImplemented
 					}
+					values = []any{val}
 					return nil
 				} else if x.Name == "id" && n.Op == sqlparser.EQ {
+					// Handle id = ? for backward compatibility
 					switch expr := n.Y.(type) {
 					case *sqlparser.BindExpr:
 						v := args[expr.Pos]
@@ -277,6 +297,29 @@ func (s *WarpItem) nonInsertValue(key string, condition sqlparser.Expr, args ...
 						}
 					default:
 						return ErrInvalidID
+					}
+					return nil
+				} else if x.Name == key && n.Op == sqlparser.IN {
+					// Handle IN operator
+					keyFind = true
+					exprs, ok := n.Y.(*sqlparser.Exprs)
+					if !ok {
+						return fmt.Errorf("IN clause must contain a list of values")
+					}
+
+					for _, expr := range exprs.Exprs {
+						var val any
+						switch e := expr.(type) {
+						case *sqlparser.BindExpr:
+							val = args[e.Pos]
+						case *sqlparser.StringLit:
+							val = e.Value
+						case *sqlparser.NumberLit:
+							val = e.Value
+						default:
+							return fmt.Errorf("unsupported expression type in IN clause: %T", e)
+						}
+						values = append(values, val)
 					}
 					return nil
 				}
