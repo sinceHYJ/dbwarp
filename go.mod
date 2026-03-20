@@ -1,4 +1,4 @@
-module dbwarp
+module github.com/sincehyj/dbwarp
 
 go 1.20
 

@@ -21,7 +21,7 @@ This framework combines and integrates two popular GORM plugins: [gorm-dbresolve
 ## Installation
 
 ```bash
-go get github.com/sinceHYJ/dbwarp
+go get github.com/sincehyj/dbwarp
 ```
 
 
