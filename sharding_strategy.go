@@ -5,14 +5,6 @@ import (
 	"time"
 )
 
-// ShardingStrategy defines the interface for different sharding strategies
-type ShardingStrategy interface {
-	// GetSuffix returns the table suffix based on the sharding key value
-	GetSuffix(value any) (string, error)
-	// GetName returns the strategy name
-	GetName() string
-}
-
 // EnumShardingStrategy maps enum values to table suffixes
 // Example: map[string]string{"beijing": "_bj", "shanghai": "_sh"}
 type EnumShardingStrategy struct {
@@ -22,10 +14,10 @@ type EnumShardingStrategy struct {
 	DefaultSuffix string
 }
 
-func (s *EnumShardingStrategy) GetSuffix(value any) (string, error) {
-	str, ok := value.(string)
+func (s *EnumShardingStrategy) GetSuffix(columnValue any) (string, error) {
+	str, ok := columnValue.(string)
 	if !ok {
-		return "", fmt.Errorf("enum sharding requires string value, got %T", value)
+		return "", fmt.Errorf("enum sharding requires string value, got %T", columnValue)
 	}
 
 	if suffix, exists := s.EnumMap[str]; exists {
@@ -37,10 +29,6 @@ func (s *EnumShardingStrategy) GetSuffix(value any) (string, error) {
 	}
 
 	return "", fmt.Errorf("value '%s' not found in enum map and no default suffix defined", str)
-}
-
-func (s *EnumShardingStrategy) GetName() string {
-	return "enum"
 }
 
 // DateShardingStrategy shards tables by date
@@ -81,10 +69,6 @@ func (s *DateShardingStrategy) GetSuffix(value any) (string, error) {
 	}
 
 	return "_" + t.Format(format), nil
-}
-
-func (s *DateShardingStrategy) GetName() string {
-	return "date"
 }
 
 // RangeShardingStrategy shards tables by numeric ranges
@@ -144,10 +128,6 @@ func (s *RangeShardingStrategy) getSuffix(index int) string {
 	return fmt.Sprintf("_%d", index)
 }
 
-func (s *RangeShardingStrategy) GetName() string {
-	return "range"
-}
-
 // HashShardingStrategy shards by hash modulo (existing behavior)
 type HashShardingStrategy struct {
 	Shards int
@@ -189,8 +169,4 @@ func (s *HashShardingStrategy) GetSuffix(value any) (string, error) {
 	}
 
 	return fmt.Sprintf("_%d", index), nil
-}
-
-func (s *HashShardingStrategy) GetName() string {
-	return "hash"
 }
