@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// ShardingStrategy defines the interface for sharding strategies
+// All strategies must implement this interface to be used with ShardingRule
+type ShardingStrategy interface {
+	// GetSuffix returns the table/database suffix based on the sharding key value
+	// This matches the signature: func(columnValue any) (suffix string, err error)
+	GetSuffix(columnValue any) (string, error)
+}
+
 // EnumShardingStrategy maps enum values to table suffixes
 // Example: map[string]string{"beijing": "_bj", "shanghai": "_sh"}
 type EnumShardingStrategy struct {
