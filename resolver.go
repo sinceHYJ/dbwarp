@@ -24,6 +24,7 @@ type DBResolver struct {
 	prepareStmtStore map[gorm.ConnPool]*gorm.PreparedStmtDB
 	compileCallbacks []func(gorm.ConnPool) error
 	once             int32
+	poolRegistry     *PoolRegistry // Global pool registry for connection pool sharing
 }
 
 type resolver struct {
@@ -295,19 +296,30 @@ func (dr *DBResolver) compileConfig(config RouterCfg) (err error) {
 func (dr *DBResolver) convertToConnPool(dialectors []gorm.Dialector) (connPools []gorm.ConnPool, err error) {
 	config := *dr.DB.Config
 	for _, dialector := range dialectors {
-		if db, err := gorm.Open(dialector, &config); err == nil {
-			connPool := db.ConnPool
+		var connPool gorm.ConnPool
+
+		// Use pool registry if available for connection pool sharing
+		if dr.poolRegistry != nil {
+			connPool, err = dr.poolRegistry.GetOrCreatePool(dialector, &config)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// Fallback: direct connection pool creation (backward compatible)
+			var db *gorm.DB
+			if db, err = gorm.Open(dialector, &config); err != nil {
+				return nil, err
+			}
+			connPool = db.ConnPool
 			if preparedStmtDB, ok := connPool.(*gorm.PreparedStmtDB); ok {
 				connPool = preparedStmtDB.ConnPool
 			}
-
-			dr.prepareStmtStore[connPool] = gorm.NewPreparedStmtDB(db.ConnPool, dr.PrepareStmtMaxSize, dr.PrepareStmtTTL)
-
-			connPools = append(connPools, connPool)
-		} else {
-			return nil, err
 		}
+
+		dr.prepareStmtStore[connPool] = gorm.NewPreparedStmtDB(connPool, dr.PrepareStmtMaxSize, dr.PrepareStmtTTL)
+
+		connPools = append(connPools, connPool)
 	}
 
-	return connPools, err
+	return connPools, nil
 }
