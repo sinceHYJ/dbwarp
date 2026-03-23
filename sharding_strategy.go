@@ -47,6 +47,19 @@ type DateShardingStrategy struct {
 	ValueFormat string
 }
 
+// GetSuffix returns the table suffix based on the date value.
+// Supported value types:
+//   - time.Time: directly used
+//   - string: parsed using ValueFormat (default: time.RFC3339)
+//   - int64: treated as Unix timestamp (seconds)
+//   - int: treated as Unix timestamp (seconds)
+//
+// Example:
+//
+//	strategy := &DateShardingStrategy{Format: "200601"} // Monthly
+//	strategy.GetSuffix("2024-01-15T10:00:00Z") // returns "_202401"
+//	strategy.GetSuffix(time.Now())             // returns "_202603"
+//	strategy.GetSuffix(int64(1704067200))      // returns "_202401"
 func (s *DateShardingStrategy) GetSuffix(value any) (string, error) {
 	var t time.Time
 	var err error
