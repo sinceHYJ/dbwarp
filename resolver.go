@@ -24,6 +24,7 @@ type DBResolver struct {
 	prepareStmtStore map[gorm.ConnPool]*gorm.PreparedStmtDB
 	compileCallbacks []func(gorm.ConnPool) error
 	once             int32
+	poolRegistry     *PoolRegistry
 }
 
 type resolver struct {
@@ -232,9 +233,17 @@ func (dr *DBResolver) compile() error {
 	return nil
 }
 
+// unwrapConnPool extracts the underlying ConnPool from a PreparedStmtDB wrapper.
+func unwrapConnPool(pool gorm.ConnPool) gorm.ConnPool {
+	if preparedStmtDB, ok := pool.(*gorm.PreparedStmtDB); ok {
+		return preparedStmtDB.ConnPool
+	}
+	return pool
+}
+
 func (dr *DBResolver) compileConfig(config RouterCfg) (err error) {
 	var (
-		connPool = dr.DB.Config.ConnPool
+		connPool = unwrapConnPool(dr.DB.Config.ConnPool)
 		r        = resolver{
 			dbResolver:        dr,
 			replPolicy:        config.ReplPolicy,
@@ -242,10 +251,6 @@ func (dr *DBResolver) compileConfig(config RouterCfg) (err error) {
 			traceResolverMode: config.TraceResolverMode,
 		}
 	)
-
-	if preparedStmtDB, ok := connPool.(*gorm.PreparedStmtDB); ok {
-		connPool = preparedStmtDB.ConnPool
-	}
 
 	if len(config.Sources) == 0 {
 		r.sources = []gorm.ConnPool{connPool}
@@ -295,19 +300,24 @@ func (dr *DBResolver) compileConfig(config RouterCfg) (err error) {
 func (dr *DBResolver) convertToConnPool(dialectors []gorm.Dialector) (connPools []gorm.ConnPool, err error) {
 	config := *dr.DB.Config
 	for _, dialector := range dialectors {
-		if db, err := gorm.Open(dialector, &config); err == nil {
-			connPool := db.ConnPool
-			if preparedStmtDB, ok := connPool.(*gorm.PreparedStmtDB); ok {
-				connPool = preparedStmtDB.ConnPool
+		var connPool gorm.ConnPool
+
+		if dr.poolRegistry != nil {
+			connPool, err = dr.poolRegistry.GetOrCreatePool(dialector, &config)
+			if err != nil {
+				return nil, err
 			}
-
-			dr.prepareStmtStore[connPool] = gorm.NewPreparedStmtDB(db.ConnPool, dr.PrepareStmtMaxSize, dr.PrepareStmtTTL)
-
-			connPools = append(connPools, connPool)
 		} else {
-			return nil, err
+			var db *gorm.DB
+			if db, err = gorm.Open(dialector, &config); err != nil {
+				return nil, err
+			}
+			connPool = unwrapConnPool(db.ConnPool)
 		}
+
+		dr.prepareStmtStore[connPool] = gorm.NewPreparedStmtDB(connPool, dr.PrepareStmtMaxSize, dr.PrepareStmtTTL)
+		connPools = append(connPools, connPool)
 	}
 
-	return connPools, err
+	return connPools, nil
 }

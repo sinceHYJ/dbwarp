@@ -19,6 +19,9 @@ type Warp struct {
 
 	_rules []*ShardingRule
 
+	// poolRegistry manages shared connection pools across all sharding rules
+	poolRegistry *PoolRegistry
+
 	mutex sync.RWMutex
 }
 
@@ -104,13 +107,20 @@ func (w *Warp) Initialize(db *gorm.DB) error {
 	if w.configs == nil {
 		w.configs = make(map[string]*WarpItem)
 	}
+
+	// Initialize global pool registry
+	if w.poolRegistry == nil {
+		w.poolRegistry = NewPoolRegistry()
+	}
+
 	for _, r := range w._rules {
 		// Create independent DBResolver for each RouterCfg (database sharding scenario)
 		var resolvers []*DBResolver
 		for _, cfg := range r.RouterCfgs {
 			dr := DBResolver{
-				config: cfg,
-				DB:     db,
+				config:       cfg,
+				DB:           db,
+				poolRegistry: w.poolRegistry, // Pass global pool registry
 			}
 			if atomic.SwapInt32(&dr.once, 1) == 0 {
 				if err = dr.compile(); err != nil {
