@@ -49,12 +49,12 @@ setup_replication() {
 # 同步表结构到从库的函数
 sync_table_structures() {
     local slave_host=$1
-    
+
     echo "Creating tables on $slave_host..."
-    
-    # 复用 init/init.sql 文件创建表结构
-    mysql -h"$slave_host" -uroot -proot123 test_db < "$SCRIPT_DIR/init/init.sql" 2>/dev/null
-    
+
+    # 使用容器内挂载的 /init 目录
+    mysql -h"$slave_host" -uroot -proot123 test_db < "/init/init.sql" 2>/dev/null
+
     echo "Tables created on $slave_host successfully!"
 }
 

@@ -251,6 +251,7 @@ services:
     container_name: dbwarp-replication-init
     volumes:
       - ./init-replication.sh:/init-replication.sh:ro
+      - ./init:/init:ro
     command: ["bash", "/init-replication.sh"]
     depends_on:
       mysql-1-slave:
